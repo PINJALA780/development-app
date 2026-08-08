@@ -1,4 +1,5 @@
-name: FastAPI CI/CD 
+
+name: FastAPI CI/CD
 
 on:
   push:
@@ -16,65 +17,156 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # --------------------------------------------------
+      # 1. Checkout
+      # --------------------------------------------------
       - name: Checkout source
         uses: actions/checkout@v4
 
+      # --------------------------------------------------
+      # 2. Python
+      # --------------------------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # --------------------------------------------------
+      # 3. Install dependencies
+      # --------------------------------------------------
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # --------------------------------------------------
+      # 4. Unit Tests
+      # --------------------------------------------------
       - name: Run Unit Tests
         env:
           PYTHONPATH: .
         run: |
           python -m pytest
 
+      # --------------------------------------------------
+      # 5. Docker Hub Login
+      # --------------------------------------------------
       - name: Login to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # --------------------------------------------------
+      # 6. Build Docker Image
+      # --------------------------------------------------
       - name: Build Docker Image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker build \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest .
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }} \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest \
+            .
 
+      # --------------------------------------------------
+      # 7. Push Docker Image
+      # --------------------------------------------------
       - name: Push Docker Image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
+          docker push \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }}
 
+          docker push \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
+
+      # --------------------------------------------------
+      # 8. Configure AWS Credentials
+      # --------------------------------------------------
       - name: Configure AWS Credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      # --------------------------------------------------
+      # 9. Configure kubectl for EKS
+      # --------------------------------------------------
       - name: Configure kubectl
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           aws eks update-kubeconfig \
             --region ${{ secrets.AWS_REGION }} \
             --name ${{ secrets.EKS_CLUSTER_NAME }}
 
+      # --------------------------------------------------
+      # 10. Verify EKS Cluster
+      # --------------------------------------------------
       - name: Verify EKS Cluster
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl get nodes
 
-      - name: Deploy to Amazon EKS
+      # --------------------------------------------------
+      # 11. Deploy Namespace
+      # --------------------------------------------------
+      - name: Deploy Namespace
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl apply -f k8s/namespace.yaml
+
+      # --------------------------------------------------
+      # 12. Deploy ConfigMap
+      # --------------------------------------------------
+      - name: Deploy ConfigMap
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
           kubectl apply -f k8s/configmap.yaml
+
+      # --------------------------------------------------
+      # 13. Deploy Application
+      # --------------------------------------------------
+      - name: Deploy Application
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
           kubectl apply -f k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
-          
 
-      - name: Verify Deployment
+      # --------------------------------------------------
+      # 14. Update Docker Image
+      # --------------------------------------------------
+      - name: Update Deployment Image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          kubectl get all -n ${GITHUB_REPOSITORY##*/}
+          kubectl set image deployment/${{ github.event.repository.name }} \
+            ${{ github.event.repository.name }}=${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }} \
+            -n ${{ github.event.repository.name }}
+
+      # --------------------------------------------------
+      # 15. Wait for Rollout
+      # --------------------------------------------------
+      - name: Wait for Deployment
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          kubectl rollout status \
+            deployment/${{ github.event.repository.name }} \
+            -n ${{ github.event.repository.name }} \
+            --timeout=180s
+
+      # --------------------------------------------------
+      # 16. Verify Deployment
+      # --------------------------------------------------
+      - name: Verify Deployment
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          kubectl get deployment \
+            -n ${{ github.event.repository.name }}
+
+          kubectl get pods \
+            -n ${{ github.event.repository.name }}
+
+          kubectl get service \
+            -n ${{ github.event.repository.name }}
