@@ -16,40 +16,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --------------------------------------------------
-      # 1. Checkout source
-      # --------------------------------------------------
+
+      # ==================================================
+      # 1. Checkout Source
+      # ==================================================
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # 2. Set up Python
-      # --------------------------------------------------
+      # ==================================================
+      # 2. Setup Python
+      # ==================================================
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # --------------------------------------------------
-      # 3. Install dependencies
-      # --------------------------------------------------
+      # ==================================================
+      # 3. Install Dependencies
+      # ==================================================
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # --------------------------------------------------
+      # ==================================================
       # 4. Run Unit Tests
-      # --------------------------------------------------
+      # ==================================================
       - name: Run Unit Tests
         env:
           PYTHONPATH: .
         run: |
           python -m pytest
 
-      # --------------------------------------------------
+      # ==================================================
       # 5. Build Docker Image
-      # --------------------------------------------------
+      # ==================================================
       - name: Build Docker Image
         run: |
           docker build \
@@ -57,11 +58,11 @@ jobs:
             -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest \
             .
 
-      # --------------------------------------------------
+      # ==================================================
       # 6. Trivy Vulnerability Scan
-      # --------------------------------------------------
+      # ==================================================
       - name: Scan Docker Image with Trivy
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }}
           format: table
@@ -70,9 +71,9 @@ jobs:
           vuln-type: "os,library"
           severity: "CRITICAL,HIGH"
 
-      # --------------------------------------------------
+      # ==================================================
       # 7. Login to Docker Hub
-      # --------------------------------------------------
+      # ==================================================
       - name: Login to Docker Hub
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
@@ -80,9 +81,9 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # --------------------------------------------------
-      # 8. Push Docker Image
-      # --------------------------------------------------
+      # ==================================================
+      # 8. Push Image to Docker Hub
+      # ==================================================
       - name: Push Docker Image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -92,9 +93,9 @@ jobs:
           docker push \
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
 
-      # --------------------------------------------------
+      # ==================================================
       # 9. Configure AWS Credentials
-      # --------------------------------------------------
+      # ==================================================
       - name: Configure AWS Credentials
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v4
@@ -103,9 +104,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # --------------------------------------------------
-      # 10. Configure kubectl
-      # --------------------------------------------------
+      # ==================================================
+      # 10. Configure kubectl for EKS
+      # ==================================================
       - name: Configure kubectl
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -113,42 +114,42 @@ jobs:
             --region ${{ secrets.AWS_REGION }} \
             --name ${{ secrets.EKS_CLUSTER_NAME }}
 
-      # --------------------------------------------------
+      # ==================================================
       # 11. Verify EKS Cluster
-      # --------------------------------------------------
+      # ==================================================
       - name: Verify EKS Cluster
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl get nodes
 
-      # --------------------------------------------------
+      # ==================================================
       # 12. Deploy Namespace
-      # --------------------------------------------------
+      # ==================================================
       - name: Deploy Namespace
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl apply -f k8s/namespace.yaml
 
-      # --------------------------------------------------
+      # ==================================================
       # 13. Deploy ConfigMap
-      # --------------------------------------------------
+      # ==================================================
       - name: Deploy ConfigMap
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl apply -f k8s/configmap.yaml
 
-      # --------------------------------------------------
+      # ==================================================
       # 14. Deploy Application
-      # --------------------------------------------------
+      # ==================================================
       - name: Deploy Application
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl apply -f k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
 
-      # --------------------------------------------------
+      # ==================================================
       # 15. Update Deployment Image
-      # --------------------------------------------------
+      # ==================================================
       - name: Update Deployment Image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -157,9 +158,9 @@ jobs:
             ${{ github.event.repository.name }}=${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }} \
             -n ${{ github.event.repository.name }}
 
-      # --------------------------------------------------
-      # 16. Wait for Rollout
-      # --------------------------------------------------
+      # ==================================================
+      # 16. Wait for Deployment Rollout
+      # ==================================================
       - name: Wait for Deployment
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -168,17 +169,20 @@ jobs:
             -n ${{ github.event.repository.name }} \
             --timeout=180s
 
-      # --------------------------------------------------
+      # ==================================================
       # 17. Verify Deployment
-      # --------------------------------------------------
+      # ==================================================
       - name: Verify Deployment
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          kubectl get deployment \
+          echo "=== Deployments ==="
+          kubectl get deployments \
             -n ${{ github.event.repository.name }}
 
+          echo "=== Pods ==="
           kubectl get pods \
             -n ${{ github.event.repository.name }}
 
-          kubectl get service \
+          echo "=== Services ==="
+          kubectl get services \
             -n ${{ github.event.repository.name }}
