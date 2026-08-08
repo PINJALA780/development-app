@@ -7,14 +7,14 @@ WORKDIR /app
 
 COPY requirements.txt .
 
+
 RUN python -m pip install --no-cache-dir --upgrade \
     pip \
     setuptools \
     wheel \
-    && python -m pip install --no-cache-dir -r requirements.txt \
-    && python -m pip install --no-cache-dir --upgrade \
     "setuptools>=78.1.1" \
-    "msgpack>=1.2.1"
+    "msgpack>=1.2.1" \
+    && python -m pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
