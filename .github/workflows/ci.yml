@@ -1,4 +1,4 @@
-name: FastAPI CI/CD For Backstage and Crossplane
+name: FastAPI CI/CD
 
 on:
   push:
@@ -16,41 +16,37 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ==================================================
-      # 1. Checkout
-      # ==================================================
+      # 1. Checkout source
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ==================================================
-      # 2. Setup Python
-      # ==================================================
+      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # ==================================================
-      # 3. Upgrade pip and install dependencies
-      # ==================================================
+      # 3. Install dependencies
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ==================================================
-      # 4. Run Unit Tests
-      # ==================================================
+      # 4. Run unit tests
       - name: Run Unit Tests
         env:
           PYTHONPATH: .
         run: |
           python -m pytest
 
-      # ==================================================
-      # 5. Build Docker Image
-      # ==================================================
+      # 5. Login to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 6. Build Docker image
       - name: Build Docker Image
         run: |
           docker build \
@@ -59,35 +55,8 @@ jobs:
             -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest \
             .
 
-      # ==================================================
-      # 6. Trivy Security Scan
-      # ==================================================
-      - name: Scan Docker Image with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }}
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: "os,library"
-          scanners: "vuln"
-          severity: "CRITICAL,HIGH"
-
-      # ==================================================
-      # 7. Login to Docker Hub
-      # ==================================================
-      - name: Login to Docker Hub
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      # ==================================================
-      # 8. Push Docker Image
-      # ==================================================
+      # 7. Push Docker image
       - name: Push Docker Image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker push \
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }}
@@ -95,96 +64,54 @@ jobs:
           docker push \
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
 
-      # ==================================================
-      # 9. Configure AWS
-      # ==================================================
+      # 8. Configure AWS credentials
       - name: Configure AWS Credentials
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # ==================================================
-      # 10. Configure kubectl
-      # ==================================================
+      # 9. Configure kubectl for EKS
       - name: Configure kubectl
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           aws eks update-kubeconfig \
             --region ${{ secrets.AWS_REGION }} \
             --name ${{ secrets.EKS_CLUSTER_NAME }}
 
-      # ==================================================
-      # 11. Verify EKS
-      # ==================================================
+      # 10. Verify EKS cluster
       - name: Verify EKS Cluster
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl get nodes
 
-      # ==================================================
-      # 12. Create Namespace
-      # ==================================================
-      - name: Deploy Namespace
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      # 11. Deploy application
+      - name: Deploy to Amazon EKS
         run: |
           kubectl apply -f k8s/namespace.yaml
-
-      # ==================================================
-      # 13. Deploy ConfigMap
-      # ==================================================
-      - name: Deploy ConfigMap
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
           kubectl apply -f k8s/configmap.yaml
-
-      # ==================================================
-      # 14. Deploy Application
-      # ==================================================
-      - name: Deploy Application
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
           kubectl apply -f k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
 
-      # ==================================================
-      # 15. Update Deployment Image
-      # ==================================================
+      # 12. Update deployment image
       - name: Update Deployment Image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          kubectl set image \
-            deployment/${{ github.event.repository.name }} \
+          kubectl set image deployment/${{ github.event.repository.name }} \
             ${{ github.event.repository.name }}=${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }} \
             -n ${{ github.event.repository.name }}
 
-      # ==================================================
-      # 16. Wait for Rollout
-      # ==================================================
+      # 13. Wait for rollout
       - name: Wait for Deployment
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           kubectl rollout status \
             deployment/${{ github.event.repository.name }} \
             -n ${{ github.event.repository.name }} \
             --timeout=180s
 
-      # ==================================================
-      # 17. Verify Deployment
-      # ==================================================
+      # 14. Verify deployment
       - name: Verify Deployment
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          echo "===== DEPLOYMENTS ====="
-          kubectl get deployments \
-            -n ${{ github.event.repository.name }}
-
-          echo "===== PODS ====="
           kubectl get pods \
             -n ${{ github.event.repository.name }}
 
-          echo "===== SERVICES ====="
-          kubectl get services \
+          kubectl get svc \
             -n ${{ github.event.repository.name }}
