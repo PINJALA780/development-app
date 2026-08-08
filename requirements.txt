@@ -2,3 +2,4 @@ fastapi
 uvicorn
 pytest
 httpx
+setuptools>=78.1.1
