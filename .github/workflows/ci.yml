@@ -1,4 +1,4 @@
-name: FastAPI CI/CD
+name: FastAPI CI/CD For Backstage and Crossplane
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
     steps:
 
       # ==================================================
-      # 1. Checkout Source
+      # 1. Checkout
       # ==================================================
       - name: Checkout source
         uses: actions/checkout@v4
@@ -32,11 +32,11 @@ jobs:
           python-version: "3.12"
 
       # ==================================================
-      # 3. Install Dependencies
+      # 3. Upgrade pip and install dependencies
       # ==================================================
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools wheel
           pip install -r requirements.txt
 
       # ==================================================
@@ -54,12 +54,13 @@ jobs:
       - name: Build Docker Image
         run: |
           docker build \
+            --pull \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.sha }} \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest \
             .
 
       # ==================================================
-      # 6. Trivy Vulnerability Scan
+      # 6. Trivy Security Scan
       # ==================================================
       - name: Scan Docker Image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
@@ -69,6 +70,7 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           vuln-type: "os,library"
+          scanners: "vuln"
           severity: "CRITICAL,HIGH"
 
       # ==================================================
@@ -82,7 +84,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # ==================================================
-      # 8. Push Image to Docker Hub
+      # 8. Push Docker Image
       # ==================================================
       - name: Push Docker Image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -94,7 +96,7 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
 
       # ==================================================
-      # 9. Configure AWS Credentials
+      # 9. Configure AWS
       # ==================================================
       - name: Configure AWS Credentials
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -105,7 +107,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       # ==================================================
-      # 10. Configure kubectl for EKS
+      # 10. Configure kubectl
       # ==================================================
       - name: Configure kubectl
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -115,7 +117,7 @@ jobs:
             --name ${{ secrets.EKS_CLUSTER_NAME }}
 
       # ==================================================
-      # 11. Verify EKS Cluster
+      # 11. Verify EKS
       # ==================================================
       - name: Verify EKS Cluster
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -123,7 +125,7 @@ jobs:
           kubectl get nodes
 
       # ==================================================
-      # 12. Deploy Namespace
+      # 12. Create Namespace
       # ==================================================
       - name: Deploy Namespace
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -159,7 +161,7 @@ jobs:
             -n ${{ github.event.repository.name }}
 
       # ==================================================
-      # 16. Wait for Deployment Rollout
+      # 16. Wait for Rollout
       # ==================================================
       - name: Wait for Deployment
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -175,14 +177,14 @@ jobs:
       - name: Verify Deployment
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          echo "=== Deployments ==="
+          echo "===== DEPLOYMENTS ====="
           kubectl get deployments \
             -n ${{ github.event.repository.name }}
 
-          echo "=== Pods ==="
+          echo "===== PODS ====="
           kubectl get pods \
             -n ${{ github.event.repository.name }}
 
-          echo "=== Services ==="
+          echo "===== SERVICES ====="
           kubectl get services \
             -n ${{ github.event.repository.name }}
